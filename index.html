@@ -13,7 +13,7 @@
         .input-group { display: flex; flex-direction: column; }
         label { font-size: 0.7rem; color: #888; margin-bottom: 5px; text-transform: uppercase; font-weight: 700; }
         input, select { background: #222; border: 1px solid #444; color: #fff; padding: 10px; border-radius: 4px; font-size: 0.9rem; }
-        svg { width: 100%; height: 500px; background: #000; border-radius: 8px; margin-top: 20px; border: 1px solid #222; }
+        svg { width: 100%; height: 500px; background: #000; border-radius: 8px; margin-top: 20px; border: 1px solid #222; cursor: crosshair; }
         .btn-group { display: flex; gap: 12px; margin-top: 25px; }
         button { padding: 12px 20px; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; text-transform: uppercase; font-size: 0.8rem; }
         .btn-primary { background: var(--accent); color: #000; }
@@ -21,6 +21,7 @@
         .status-msg { color: var(--error); font-weight: 700; font-size: 0.85rem; }
         .axis line, .axis path { stroke: #333; }
         .axis text { fill: #666; font-size: 11px; }
+        .tooltip-text { fill: var(--accent); font-family: monospace; font-size: 13px; pointer-events: none; font-weight: bold; }
     </style>
 </head>
 <body>
@@ -35,8 +36,8 @@
         <div class="input-group"><label>Project</label><input type="text" id="projName" value="Garage-Design-01"></div>
         <div class="input-group"><label>Street RL</label><input type="number" id="startElev" value="10.000" step="0.001"></div>
         <div class="input-group"><label>Garage RL</label><input type="number" id="targetElev" value="11.500" step="0.001"></div>
-        <div class="input-group"><label>Length (m)</label><input type="number" id="totalLen" value="12.0" step="0.1"></div>
-        <div class="input-group"><label>Ramp Len</label><input type="number" id="kerbLen" value="1.5" step="0.1"></div>
+        <div class="input-group"><label>Driveway Length</label><input type="number" id="totalLen" value="12.0" step="0.1"></div>
+        <div class="input-group"><label>Ramp Length</label><input type="number" id="kerbLen" value="1.5" step="0.1"></div>
         <div class="input-group"><label>Ramp %</label><input type="number" id="kerbGrade" value="12.5" step="0.1"></div>
         <div class="input-group"><label>FP Width</label><input type="number" id="fpWidth" value="1.5" step="0.1"></div>
         <div class="input-group"><label>FP Grade %</label><input type="number" id="fpGrade" value="2.5" step="0.1"></div>
@@ -74,13 +75,13 @@
         B85: { wheelbase: 2.8, frontOH: 0.92, rearOH: 1.19, groundClr: 0.12, height: 1.4 },
         B99: { wheelbase: 3.05, frontOH: 0.94, rearOH: 1.21, groundClr: 0.14, height: 1.5 }
     };
-    let mouseX = 200;
+    let mouseX = -1;
 
     function solve() {
         const cfg = {
             s: +d3.select("#startElev").property("value"),
             t: +d3.select("#targetElev").property("value"),
-            len: +d3.select("#totalLen").property("value"),
+            len: +d3.select("#totalLen").property("value"), // Edge of garage door
             kL: +d3.select("#kerbLen").property("value"),
             kG: +d3.select("#kerbGrade").property("value")/100,
             fW: +d3.select("#fpWidth").property("value"),
@@ -105,33 +106,57 @@
             gStart = cfg.fG * dir;
         }
 
-        // 3. Solver for Main Section
-        const remX = cfg.len - curX - (cfg.trans * 2); 
-        const mainG = (cfg.t - (curY + (cfg.trans * (gStart + 0)/2) * 2)) / remX; // Conceptual balance
+        // 3. Exact Solver for Main Section
+        const x_rem = cfg.len - curX;
+        if (x_rem < 3.0) {
+            d3.select("#status").text("ERROR: Driveway too short for transitions.");
+            return res; // Prevent wild geometries if inputs are invalid
+        }
+        
+        const x_main = x_rem - (cfg.trans * 2); 
+        const deltaY = cfg.t - curY;
+        
+        // Algebraically solved grade to ensure perfect target hit using parabolic area
+        const mainG = (deltaY - 0.75 * gStart) / (x_main + 1.5);
 
-        // Transition 1 (Crest/Sag)
+        // Transition 1 (Crest/Sag) - Exact trapezoidal integration
+        let gPrev = gStart;
         for(let i=1; i<=10; i++) {
-            let g = gStart + (mainG - gStart) * (i/10);
-            curX += (cfg.trans/10); curY += (cfg.trans/10 * g);
+            let gCurr = gStart + (mainG - gStart) * (i/10);
+            curY += (cfg.trans/10) * (gPrev + gCurr) / 2;
+            curX += (cfg.trans/10);
             res.push({x: curX, y: curY});
+            gPrev = gCurr;
         }
 
         // Main Driveway
-        curX += remX; curY += (remX * mainG);
+        curX += x_main; 
+        curY += (x_main * mainG);
         res.push({x: curX, y: curY});
 
         // Transition 2 (Garage Entry)
+        gPrev = mainG;
         for(let i=1; i<=10; i++) {
-            let g = mainG + (0 - mainG) * (i/10);
-            curX += (cfg.trans/10); curY += (cfg.trans/10 * g);
+            let gCurr = mainG + (0 - mainG) * (i/10);
+            curY += (cfg.trans/10) * (gPrev + gCurr) / 2;
+            curX += (cfg.trans/10);
             res.push({x: curX, y: curY});
+            gPrev = gCurr;
         }
 
-        // 4. Garage Flat
-        res.push({x: curX + cfg.flat, y: cfg.t});
+        // 4. Garage Flat (Perfect 0% grade)
+        res.push({x: curX + cfg.flat, y: curY});
         
         d3.select("#status").text(Math.abs(mainG) > 0.25 ? `EXCEEDS 25%: ${(mainG*100).toFixed(1)}%` : "");
         return res;
+    }
+
+    function getInterpY(data, x) {
+        if (x <= data[0].x) return data[0].y;
+        if (x >= data[data.length-1].x) return data[data.length-1].y;
+        const i = d3.bisector(d => d.x).left(data, x);
+        const p1 = data[i-1], p2 = data[i];
+        return p1.y + (x - p1.x) / (p2.x - p1.x) * (p2.y - p1.y);
     }
 
     function render() {
@@ -141,22 +166,56 @@
         const margin = {top: 40, right: 40, bottom: 40, left: 60};
         svg.selectAll("*").remove();
 
-        const xS = d3.scaleLinear().domain([0, d3.max(data, d=>d.x)]).range([margin.left, width - margin.right]);
+        if(data.length < 3) return; // Prevent crash on invalid inputs
+
+        const totalX = d3.max(data, d=>d.x);
+        const xS = d3.scaleLinear().domain([0, totalX]).range([margin.left, width - margin.right]);
         const yS = d3.scaleLinear().domain([d3.min(data, d=>d.y)-0.4, d3.max(data, d=>d.y)+0.4]).range([height - margin.bottom, margin.top]);
 
+        // Plot Profile
         svg.append("path").datum(data).attr("fill", "none").attr("stroke", "#00e676").attr("stroke-width", 3).attr("d", d3.line().x(d => xS(d.x)).y(d => yS(d.y)));
         
-        const vT = d3.select("#vehicleType").property("value");
-        if(vT !== "none") {
-            const v = vehicles[vT];
-            const pX = xS.invert(mouseX);
-            svg.append("rect").attr("x", xS(pX - v.rearOH)).attr("y", yS(d3.select("#targetElev").property("value") + v.height))
-               .attr("width", xS(pX + v.wheelbase + v.frontOH) - xS(pX - v.rearOH)).attr("height", 30).attr("fill", "rgba(0, 230, 118, 0.2)");
+        // Interactive Hover & Vehicle Logic
+        const pX = xS.invert(mouseX);
+        if(pX >= 0 && pX <= totalX && mouseX > 0) {
+            const pY = getInterpY(data, pX);
+            
+            // 1. Crosshair & Coordinate Text
+            svg.append("line").attr("stroke", "#444").attr("stroke-dasharray", "4")
+               .attr("x1", xS(pX)).attr("x2", xS(pX)).attr("y1", margin.top).attr("y2", height - margin.bottom);
+            svg.append("circle").attr("cx", xS(pX)).attr("cy", yS(pY)).attr("r", 5).attr("fill", "#00e676");
+            
+            // Adjust text position so it doesn't clip off the screen
+            const textX = pX > totalX - 3 ? xS(pX) - 150 : xS(pX) + 15;
+            svg.append("text").attr("class", "tooltip-text").attr("x", textX).attr("y", yS(pY) - 15)
+               .text(`X: ${pX.toFixed(2)}m | RL: ${pY.toFixed(3)}m`);
+
+            // 2. Vehicle Template
+            const vT = d3.select("#vehicleType").property("value");
+            if(vT !== "none") {
+                const v = vehicles[vT];
+                const frontWheelX = pX + v.wheelbase;
+                const rY = pY;
+                const fY = getInterpY(data, frontWheelX);
+                const angle = Math.atan2(fY - rY, v.wheelbase) * (180/Math.PI);
+
+                // Rotated chassis approximation
+                svg.append("rect")
+                   .attr("x", xS(pX - v.rearOH)).attr("y", yS(rY + v.groundClr))
+                   .attr("width", xS(v.wheelbase + v.frontOH + v.rearOH) - margin.left).attr("height", 4)
+                   .attr("fill", "rgba(255, 82, 82, 0.8)")
+                   .attr("transform", `rotate(${-angle}, ${xS(pX)}, ${yS(rY)})`);
+            }
         }
 
+        // Axes
         svg.append("g").attr("class","axis").attr("transform",`translate(0,${height-margin.bottom})`).call(d3.axisBottom(xS));
         svg.append("g").attr("class","axis").attr("transform",`translate(${margin.left},0)`).call(d3.axisLeft(yS));
-        svg.on("mousemove", (e) => { mouseX = d3.pointer(e)[0]; render(); });
+        
+        // Invisible overlay for tracking mouse safely
+        svg.append("rect").attr("width", width).attr("height", height).attr("fill", "transparent")
+           .on("mousemove", (e) => { mouseX = d3.pointer(e)[0]; render(); })
+           .on("mouseout", () => { mouseX = -1; render(); });
     }
 
     const blob = new Blob([document.getElementById('worker-script').textContent], { type: 'application/javascript' });
