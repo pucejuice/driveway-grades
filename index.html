@@ -2,193 +2,179 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Ingeniir | Driveway Solver & Clearance Check</title>
+    <title>Ingeniir | Driveway Solver Dark</title>
     <script src="https://d3js.org/d3.v7.min.js"></script>
     <style>
-        body { font-family: 'Segoe UI', sans-serif; padding: 20px; background: #eceff1; }
-        #app-container { max-width: 1200px; margin: 0 auto; background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
-        .controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; margin-bottom: 25px; }
+        :root { --bg: #121212; --card: #1e1e1e; --text: #e0e0e0; --accent: #00e676; --border: #333; }
+        body { font-family: 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); padding: 20px; margin: 0; }
+        #app-container { max-width: 1300px; margin: 0 auto; background: var(--card); padding: 25px; border-radius: 12px; border: 1px solid var(--border); }
+        .controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 15px; margin-bottom: 20px; }
         .input-group { display: flex; flex-direction: column; }
-        svg { width: 100%; height: 450px; background: #fafafa; border: 1px solid #cfd8dc; border-radius: 8px; cursor: crosshair; }
-        .vehicle-body { fill: rgba(33, 150, 243, 0.1); stroke: #1976d2; stroke-width: 1; }
-        .chassis-line { fill: none; stroke: #d32f2f; stroke-width: 2; }
-        .clearance-dim { font-weight: bold; font-size: 14px; }
-        .warning-text { color: #d32f2f; fill: #d32f2f; }
-        .safe-text { color: #2e7d32; fill: #2e7d32; }
-        button { padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
-        .btn-primary { background: #263238; color: white; }
+        label { font-size: 0.75rem; font-weight: bold; color: #aaa; margin-bottom: 4px; text-transform: uppercase; }
+        input, select { background: #2c2c2c; border: 1px solid var(--border); color: white; padding: 8px; border-radius: 4px; }
+        svg { width: 100%; height: 500px; background: #000; border: 1px solid var(--border); border-radius: 8px; margin: 20px 0; }
+        .btn-group { display: flex; gap: 10px; flex-wrap: wrap; }
+        button { padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; transition: 0.3s; }
+        .btn-primary { background: var(--accent); color: #000; }
+        .btn-secondary { background: #424242; color: white; }
+        .warning { color: #ff5252; font-size: 0.9rem; margin-top: 10px; height: 1.2em; }
+        .domain, .tick line { stroke: #555; }
+        .tick text { fill: #888; }
     </style>
 </head>
 <body>
 
 <div id="app-container">
-    <h2>Driveway Solver & Clearance Pro</h2>
+    <div style="display:flex; justify-content: space-between; align-items: center;">
+        <h2 style="margin:0; color:var(--accent);">Driveway Solver Pro</h2>
+        <div id="status" class="warning"></div>
+    </div>
+    
     <div class="controls">
-        <div class="input-group"><label>Target RL (m)</label><input type="number" id="targetElev" value="11.200" step="0.01"></div>
-        <div class="input-group"><label>Total Len (m)</label><input type="number" id="totalLen" value="12.0"></div>
+        <div class="input-group"><label>Project Name</label><input type="text" id="projName" value="Job-01"></div>
+        <div class="input-group"><label>Start RL (m)</label><input type="number" id="startElev" value="10.000" step="0.01"></div>
+        <div class="input-group"><label>Target RL (m)</label><input type="number" id="targetElev" value="11.500" step="0.01"></div>
+        <div class="input-group"><label>Total Length (m)</label><input type="number" id="totalLen" value="12.0" step="0.1"></div>
+        <div class="input-group"><label>Kerb Ramp (m)</label><input type="number" id="kerbLen" value="1.5" step="0.1"></div>
+        <div class="input-group"><label>Kerb Grade (%)</label><input type="number" id="kerbGrade" value="12.5" step="0.1"></div>
+        <div class="input-group"><label>FP Width (m)</label><input type="number" id="fpWidth" value="1.5" step="0.1"></div>
+        <div class="input-group"><label>FP Grade (%)</label><input type="number" id="fpGrade" value="2.5" step="0.1"></div>
+        <div class="input-group"><label>Max Driveway (%)</label><input type="number" id="maxGLimit" value="25.0" step="0.5"></div>
         <div class="input-group">
             <label>Template</label>
-            <select id="vehicleType" onchange="render()">
-                <option value="none">None</option>
-                <option value="B85">B85 (AS2890.1)</option>
-                <option value="B99">B99 (AS2890.1)</option>
-            </select>
+            <select id="vehicleType" onchange="render()"><option value="none">None</option><option value="B85">B85</option><option value="B99">B99</option></select>
         </div>
-        <div class="input-group"><label>Kerb %</label><input type="number" id="kerbGrade" value="12.5"></div>
-        <div class="input-group"><label>Max Driveway %</label><input type="number" id="maxGradeLimit" value="25.0"></div>
+        <div class="input-group"><label>No Footpath</label><input type="checkbox" id="ignoreFp"></div>
     </div>
 
     <svg id="profileDisplay"></svg>
 
-    <div class="button-group">
+    <div class="btn-group">
         <button class="btn-primary" onclick="exportDXF()">Download DXF</button>
-        <button onclick="saveProject()">Save JSON</button>
+        <button class="btn-secondary" onclick="saveProject()">Save JSON</button>
+        <button class="btn-secondary" onclick="document.getElementById('fileInput').click()">Load JSON</button>
         <input type="file" id="fileInput" style="display:none" onchange="loadProject(event)">
-        <button onclick="document.getElementById('fileInput').click()">Load JSON</button>
     </div>
 </div>
 
 <script id="worker-script" type="javascript/worker">
-    // SDXF Inlined Worker Logic
     const NL = String.fromCharCode(10);
-    function _point(x, index = 0) { return x.map((val, i) => `${(i + 1) * 10 + index}${NL}${val}`).join(NL); }
-    class LwPolyLine {
-        constructor(points, layer) { this.points = points; this.layer = layer; }
-        toString() {
-            let lines = ['0', 'LWPOLYLINE', '8', this.layer, '62', '3', '90', this.points.length];
-            this.points.forEach(pt => lines.push(_point(pt)));
-            return lines.join(NL);
-        }
-    }
-    class Drawing {
-        constructor() { this.entities = []; }
-        toString() {
-            return ['0', 'SECTION', '2', 'ENTITIES', this.entities.map(e => e.toString()).join(NL), '0', 'ENDSEC', '0', 'EOF'].join(NL);
-        }
-    }
+    function _point(pt) { return `10${NL}${pt[0]}${NL}20${NL}${pt[1]}`; }
     self.onmessage = function(e) {
-        const d = new Drawing();
-        d.entities.push(new LwPolyLine(e.data.points, 'DESIGN_PROFILE'));
-        self.postMessage({ dxfString: d.toString(), fileName: e.data.projectName + ".dxf" });
+        const { points, projectName } = e.data;
+        let dxf = ['0', 'SECTION', '2', 'ENTITIES'].join(NL);
+        dxf += `${NL}0${NL}LWPOLYLINE${NL}8${NL}DESIGN${NL}62${NL}3${NL}90${NL}${points.length}`;
+        points.forEach(p => dxf += `${NL}${_point(p)}`);
+        dxf += `${NL}0${NL}ENDSEC${NL}0${NL}EOF`;
+        self.postMessage({ dxfString: dxf, fileName: projectName + ".dxf" });
     };
 </script>
 
 <script>
-    // AS2890.1 Specs
     const vehicles = {
         B85: { wheelbase: 2.8, frontOH: 0.92, rearOH: 1.19, groundClr: 0.12, height: 1.4 },
         B99: { wheelbase: 3.05, frontOH: 0.94, rearOH: 1.21, groundClr: 0.14, height: 1.5 }
     };
-
-    let mouseX = 0;
+    let mouseX = 100;
 
     function solve() {
         const config = {
-            start: +d3.select("#startElev")?.property("value") || 10.0,
+            start: +d3.select("#startElev").property("value"),
             target: +d3.select("#targetElev").property("value"),
             totalX: +d3.select("#totalLen").property("value"),
-            kerbL: 1.5,
-            kerbG: +d3.select("#kerbGrade").property("value") / 100,
-            transLen: 1.5,
-            segments: 10
+            kL: +d3.select("#kerbLen").property("value"),
+            kG: +d3.select("#kerbGrade").property("value") / 100,
+            fpW: +d3.select("#fpWidth").property("value"),
+            fpG: +d3.select("#fpGrade").property("value") / 100,
+            ignoreFp: d3.select("#ignoreFp").property("checked"),
+            maxG: +d3.select("#maxGLimit").property("value") / 100
         };
 
         const dir = Math.sign(config.target - config.start);
-        let pts = [{x: 0, y: config.start}];
-        
-        let x = config.kerbL, y = config.start + (config.kerbL * config.kerbG * dir);
-        pts.push({x, y});
+        let pts = [{x: 0, y: config.start, g: 0}];
+        let x = 0, y = config.start;
 
-        const mainGrade = (config.target - y) / (config.totalX - x);
-        const stepX = config.transLen / config.segments;
-        
-        for (let i = 1; i <= config.segments; i++) {
-            const t = i / config.segments;
-            const g = (config.kerbG * dir) + (mainGrade - (config.kerbG * dir)) * t;
-            x += stepX; y += (stepX * g);
-            pts.push({x, y});
+        // 1. Kerb
+        x += config.kL; y += (config.kL * config.kG * dir);
+        pts.push({x, y, g: config.kG * dir});
+
+        // 2. Footpath
+        const currentFPGrade = config.ignoreFp ? (config.kG * dir) : (config.fpG * dir);
+        if(!config.ignoreFp) {
+            x += config.fpW; y += (config.fpW * currentFPGrade);
+            pts.push({x, y, g: currentFPGrade});
         }
-        pts.push({x: config.totalX, y: config.target});
-        return pts;
-    }
 
-    function getInterpY(data, x) {
-        const bisect = d3.bisector(d => d.x).left;
-        const idx = bisect(data, x);
-        if (idx <= 0) return data[0].y;
-        if (idx >= data.length) return data[data.length-1].y;
-        const p1 = data[idx-1], p2 = data[idx];
-        const t = (x - p1.x) / (p2.x - p1.x);
-        return p1.y + t * (p2.y - p1.y);
+        // 3. Transition Solver (10-Segment)
+        const transLen = 1.5;
+        const mainX = config.totalX - (x + transLen);
+        const mainG = (config.target - (y + (transLen * (currentFPGrade + (config.maxG * dir))/2))) / mainX;
+
+        const step = transLen / 10;
+        for(let i=1; i<=10; i++) {
+            const t = i/10;
+            const g = currentFPGrade + (mainG - currentFPGrade) * t;
+            x += step; y += (step * g);
+            pts.push({x, y, g});
+        }
+
+        pts.push({x: config.totalX, y: config.target, g: mainG});
+        d3.select("#status").text(Math.abs(mainG) > config.maxG ? `Limit Exceeded: ${(mainG*100).toFixed(1)}%` : "");
+        return pts;
     }
 
     function render() {
         const data = solve();
         const svg = d3.select("#profileDisplay");
         const {width, height} = svg.node().getBoundingClientRect();
-        const margin = {top: 50, right: 50, bottom: 50, left: 60};
-
+        const margin = {top: 40, right: 40, bottom: 40, left: 60};
         svg.selectAll("*").remove();
+
         const xScale = d3.scaleLinear().domain([0, +d3.select("#totalLen").property("value")]).range([margin.left, width - margin.right]);
-        const yScale = d3.scaleLinear().domain([d3.min(data, d => d.y)-0.5, d3.max(data, d => d.y)+0.5]).range([height - margin.bottom, margin.top]);
+        const yScale = d3.scaleLinear().domain([d3.min(data, d=>d.y)-0.2, d3.max(data, d=>d.y)+0.2]).range([height - margin.bottom, margin.top]);
 
         // Draw Profile
-        svg.append("path").datum(data).attr("fill", "none").attr("stroke", "#2ecc71").attr("stroke-width", 3).attr("d", d3.line().x(d => xScale(d.x)).y(d => yScale(d.y)));
+        svg.append("path").datum(data).attr("fill", "none").attr("stroke", "#00e676").attr("stroke-width", 3).attr("d", d3.line().x(d => xScale(d.x)).y(d => yScale(d.y)));
         
+        // Clearance Logic
         const vType = d3.select("#vehicleType").property("value");
-        if (vType !== "none") {
+        if(vType !== "none") {
             const v = vehicles[vType];
             const vX = xScale.invert(mouseX);
-            
-            // Calculate Wheel Positions
-            const rearWheelX = vX;
-            const frontWheelX = vX + v.wheelbase;
-            const rearWheelY = getInterpY(data, rearWheelX);
-            const frontWheelY = getInterpY(data, frontWheelX);
-            
-            // Vehicle Angle
-            const angle = Math.atan2(frontWheelY - rearWheelY, v.wheelbase);
-            
-            // Chassis Line (simplified flat-bottom check)
-            const chassisPoints = [];
-            let minClr = 999;
-            let minClrX = 0, minClrY = 0;
-
-            for(let i = -v.rearOH; i <= v.wheelbase + v.frontOH; i += 0.1) {
-                const cx = vX + i;
-                const cy = rearWheelY + (i * Math.tan(angle)) + v.groundClr;
-                const groundY = getInterpY(data, cx);
-                const clr = cy - groundY;
-                if(clr < minClr) { 
-                    minClr = clr; minClrX = cx; minClrY = cy; 
-                }
-                chassisPoints.push({x: cx, y: cy});
-            }
-
-            // Draw Chassis Line
-            svg.append("path").datum(chassisPoints).attr("class", "chassis-line").attr("d", d3.line().x(d => xScale(d.x)).y(d => yScale(d.y)));
-
-            // Dimension
-            const isScraping = minClr <= 0.01;
-            svg.append("line").attr("x1", xScale(minClrX)).attr("y1", yScale(minClrY)).attr("x2", xScale(minClrX)).attr("y2", yScale(getInterpY(data, minClrX))).attr("stroke", isScraping ? "red" : "black").attr("stroke-width", 2);
-            svg.append("text").attr("x", xScale(minClrX) + 5).attr("y", yScale(minClrY + minClr/2)).text(`${(minClr * 1000).toFixed(0)}mm`).attr("class", isScraping ? "warning-text clearance-dim" : "safe-text clearance-dim");
+            const rY = d3.bisector(d=>d.x).left(data, vX); 
+            // Simplified vehicle visualization
+            svg.append("rect").attr("x", xScale(vX - v.rearOH)).attr("y", yScale(data[rY]?.y || data[0].y + 1.2))
+               .attr("width", xScale(v.width) - xScale(0)).attr("height", 20).attr("fill", "rgba(0, 230, 118, 0.2)");
         }
 
         svg.append("g").attr("transform", `translate(0,${height - margin.bottom})`).call(d3.axisBottom(xScale));
         svg.append("g").attr("transform", `translate(${margin.left},0)`).call(d3.axisLeft(yScale));
-        
         svg.on("mousemove", (e) => { mouseX = d3.pointer(e)[0]; render(); });
     }
 
     const workerBlob = new Blob([document.getElementById('worker-script').textContent], { type: 'application/javascript' });
     const dxfWorker = new Worker(URL.createObjectURL(workerBlob));
-    function exportDXF() { dxfWorker.postMessage({ points: solve().map(p => [p.x, p.y]), projectName: "Driveway" }); }
+    function exportDXF() { dxfWorker.postMessage({ points: solve().map(p => [p.x, p.y]), projectName: d3.select("#projName").property("value") }); }
     dxfWorker.onmessage = (e) => {
         const link = document.createElement('a');
         link.href = URL.createObjectURL(new Blob([e.data.dxfString], { type: 'application/dxf' }));
         link.download = e.data.fileName;
         link.click();
     };
+
+    function saveProject() {
+        const state = {}; d3.selectAll("input").each(function() { state[this.id] = this.type === 'checkbox' ? this.checked : this.value; });
+        const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(state)], {type:'application/json'}));
+        a.download = d3.select("#projName").property("value") + ".json"; a.click();
+    }
+
+    function loadProject(e) {
+        const reader = new FileReader(); reader.onload = (ev) => {
+            const s = JSON.parse(ev.target.result); Object.keys(s).forEach(k => {
+                const el = d3.select("#"+k); if(el.property("type") === 'checkbox') el.property("checked", s[k]); else el.property("value", s[k]);
+            }); render();
+        }; reader.readAsText(e.target.files[0]);
+    }
 
     d3.selectAll("input").on("input", render);
     render();
