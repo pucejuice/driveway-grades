@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Driveway Profiler (True Scale)</title>
+    <title>Driveway Profiler</title>
     <script src="https://d3js.org/d3.v7.min.js"></script>
     <style>
         :root { --bg: #0a0a0a; --panel: #161616; --accent: #00e676; --text: #e0e0e0; --error: #ff5252; }
@@ -13,8 +13,8 @@
         .input-group { display: flex; flex-direction: column; transition: opacity 0.2s; }
         label { font-size: 0.7rem; color: #888; margin-bottom: 5px; text-transform: uppercase; font-weight: 700; }
         input, select { background: #222; border: 1px solid #444; color: #fff; padding: 10px; border-radius: 4px; font-size: 0.9rem; }
-        .checkbox-group { flex-direction: row; align-items: center; gap: 10px; padding-top: 25px; }
-        .checkbox-group input { width: 18px; height: 18px; cursor: pointer; }
+        .checkbox-group { flex-direction: row; align-items: center; gap: 8px; padding-top: 25px; }
+        .checkbox-group input { width: 16px; height: 16px; cursor: pointer; margin: 0; }
         svg { width: 100%; height: 450px; background: #000; border-radius: 8px; margin-top: 20px; border: 1px solid #222; cursor: crosshair; }
         .btn-group { display: flex; gap: 12px; margin-top: 25px; }
         button { padding: 12px 20px; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; text-transform: uppercase; font-size: 0.8rem; }
@@ -41,7 +41,7 @@
     <div class="controls">
         <div class="input-group"><label>Project</label><input type="text" id="projName" value="Driveway-Design"></div>
         <div class="input-group"><label>Street RL</label><input type="number" id="startElev" value="10.000" step="0.001"></div>
-        <div class="input-group"><label>Garage RL</label><input type="number" id="targetElev" value="11.500" step="0.001"></div>
+        <div class="input-group"><label>Garage RL</label><input type="number" id="targetElev" value="9.000" step="0.001"></div>
         <div class="input-group"><label>Length (m)</label><input type="number" id="totalLen" value="12.0" step="0.1"></div>
         <div class="input-group"><label>Max Grade ±%</label><input type="number" id="maxGrade" value="25.0" step="0.5"></div>
         <div class="input-group"><label>Ramp Len</label><input type="number" id="kerbLen" value="1.5" step="0.1"></div>
@@ -52,14 +52,19 @@
         
         <div class="input-group checkbox-group">
             <input type="checkbox" id="ignoreFp">
-            <label style="margin:0;">No FP</label>
+            <label style="margin:0; font-size:0.75rem;">No FP</label>
+        </div>
+        
+        <div class="input-group checkbox-group">
+            <input type="checkbox" id="forceCrest" checked>
+            <label style="margin:0; font-size:0.75rem;" title="Ensure 250mm freeboard above street RL for downward sloping lots">min. 250mm Crest</label>
         </div>
 
         <div class="input-group">
             <label>Template</label>
             <select id="vehicleType" onchange="render()">
                 <option value="none">None</option>
-                <option value="B85">B85</option>
+                <option value="B85" selected>B85</option>
                 <option value="B99">B99</option>
             </select>
         </div>
@@ -128,7 +133,6 @@
     };
     let mouseX = -1;
 
-    // Helper function to get yymmdd string
     function getYYMMDD() {
         const now = new Date();
         const yy = String(now.getFullYear()).slice(-2);
@@ -138,11 +142,12 @@
     }
 
     d3.select("#ignoreFp").on("change", function() {
-        const isHidden = this.checked;
-        d3.select("#fpWidthGroup").style("display", isHidden ? "none" : "flex");
-        d3.select("#fpGradeGroup").style("display", isHidden ? "none" : "flex");
+        d3.select("#fpWidthGroup").style("display", this.checked ? "none" : "flex");
+        d3.select("#fpGradeGroup").style("display", this.checked ? "none" : "flex");
         render();
     });
+
+    d3.select("#forceCrest").on("change", render);
 
     function solve() {
         const cfg = {
@@ -155,10 +160,10 @@
             fG: +d3.select("#fpGrade").property("value")/100, 
             maxG: +d3.select("#maxGrade").property("value")/100,
             noFP: d3.select("#ignoreFp").property("checked"),
+            forceCrest: d3.select("#forceCrest").property("checked"),
             flat: 2.0, trans: 1.5
         };
 
-        // nextLabel stores the grade of the segment proceeding the point
         let res = [{x: 0, y: cfg.s, isKey: true, nextLabel: (cfg.kG * 100).toFixed(1) + "%"}];
         let curX = 0, curY = cfg.s;
 
@@ -170,8 +175,19 @@
         let gStart = cfg.kG;
         if(!cfg.noFP) {
             curX += cfg.fW; curY += (cfg.fW * cfg.fG);
-            res.push({x: curX, y: curY, isKey: true, nextLabel: ""}); // Next segment is curve (omit label)
+            res.push({x: curX, y: curY, isKey: true, nextLabel: ""});
             gStart = cfg.fG;
+        }
+
+        // 2.5 Queensland 250mm Crest Requirement Check
+        if (cfg.forceCrest && cfg.t < cfg.s && curY < cfg.s + 0.25) {
+            res[res.length - 1].nextLabel = "5.0%"; // Label for the up-grade
+            const reqY = cfg.s + 0.25;
+            const dist = (reqY - curY) / 0.05; // Extend at 5% grade to reach the 250mm freeboard
+            curX += dist;
+            curY = reqY;
+            res.push({x: curX, y: curY, isKey: true, nextLabel: ""});
+            gStart = 0.0; // The transition down starts perfectly flat at the crest
         }
 
         const x_rem = cfg.len - curX;
@@ -196,7 +212,7 @@
 
         // Main Driveway
         curX += x_main; curY += (x_main * mainG);
-        res.push({x: curX, y: curY, isKey: true, nextLabel: ""}); // Next segment is curve (omit label)
+        res.push({x: curX, y: curY, isKey: true, nextLabel: ""});
 
         // Transition 2
         gPrev = mainG;
@@ -223,27 +239,20 @@
         return p1.y + (x - p1.x) / (p2.x - p1.x) * (p2.y - p1.y);
     }
 
-    // --- MATHEMATICAL COLLISION DETECTION ---
     function checkCollision(data, pX, v) {
         const rY = getInterpY(data, pX);
         const fX = pX + v.wheelbase;
         const fY = getInterpY(data, fX);
-        
         const slope = (fY - rY) / v.wheelbase;
-        
         const startX = pX - v.rearOH;
         const endX = pX + v.wheelbase + v.frontOH;
         const maxX = d3.max(data, d => d.x);
 
         for (let x = startX; x <= endX; x += 0.05) {
             if (x < 0 || x > maxX) continue; 
-            
             const groundY = getInterpY(data, x);
             const chassisY = rY + v.groundClr + (x - pX) * slope;
-            
-            if (groundY > chassisY) {
-                return true; 
-            }
+            if (groundY > chassisY) return true; 
         }
         return false;
     }
@@ -290,12 +299,10 @@
            .attr("x1", d => xS(d.x)).attr("x2", d => xS(d.x))
            .attr("y1", dimY - 8).attr("y2", dimY + 8).attr("stroke", "#555");
 
-        // Dimension Lengths
         svg.selectAll(".dim-text").data(keyPts.slice(0,-1)).enter().append("text").attr("class", "dim-text")
            .attr("x", (d,i) => (xS(d.x) + xS(keyPts[i+1].x))/2).attr("y", dimY - 14)
            .text((d,i) => (keyPts[i+1].x - d.x).toFixed(2) + "m");
 
-        // Dimension Grades (Omitted for curves)
         svg.selectAll(".dim-grade").data(keyPts.slice(0,-1)).enter().append("text").attr("class", "dim-grade")
            .attr("x", (d,i) => (xS(d.x) + xS(keyPts[i+1].x))/2).attr("y", dimY - 2)
            .text(d => d.nextLabel || "");
@@ -379,6 +386,7 @@
 
     d3.selectAll("input").on("input", render);
     d3.select("#ignoreFp").dispatch('change');
+    d3.select("#forceCrest").dispatch('change');
     render();
     window.addEventListener('resize', render);
 </script>
