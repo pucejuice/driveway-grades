@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Driveway Profiler</title>
+    <title>Driveway Profiler (True Scale)</title>
     <script src="https://d3js.org/d3.v7.min.js"></script>
     <style>
         :root { --bg: #0a0a0a; --panel: #161616; --accent: #00e676; --text: #e0e0e0; --error: #ff5252; }
@@ -15,7 +15,7 @@
         input, select { background: #222; border: 1px solid #444; color: #fff; padding: 10px; border-radius: 4px; font-size: 0.9rem; }
         .checkbox-group { flex-direction: row; align-items: center; gap: 10px; padding-top: 25px; }
         .checkbox-group input { width: 18px; height: 18px; cursor: pointer; }
-        svg { width: 100%; height: 400px; background: #000; border-radius: 8px; margin-top: 20px; border: 1px solid #222; cursor: crosshair; }
+        svg { width: 100%; height: 450px; background: #000; border-radius: 8px; margin-top: 20px; border: 1px solid #222; cursor: crosshair; }
         .btn-group { display: flex; gap: 12px; margin-top: 25px; }
         button { padding: 12px 20px; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; text-transform: uppercase; font-size: 0.8rem; }
         .btn-primary { background: var(--accent); color: #000; }
@@ -24,6 +24,8 @@
         .axis line, .axis path { stroke: #333; }
         .axis text { fill: #666; font-size: 11px; }
         .tooltip-text { fill: var(--accent); font-family: monospace; font-size: 13px; pointer-events: none; font-weight: bold; }
+        .dim-text { fill: #aaa; font-size: 11px; text-anchor: middle; user-select: none; }
+        .rl-text { fill: var(--accent); font-size: 10px; text-anchor: middle; font-family: monospace; user-select: none; }
     </style>
 </head>
 <body>
@@ -35,7 +37,7 @@
     </div>
     
     <div class="controls">
-        <div class="input-group"><label>Project</label><input type="text" id="projName" value="Garage-Design-01"></div>
+        <div class="input-group"><label>Project</label><input type="text" id="projName" value="Driveway-Design"></div>
         <div class="input-group"><label>Street RL</label><input type="number" id="startElev" value="10.000" step="0.001"></div>
         <div class="input-group"><label>Garage RL</label><input type="number" id="targetElev" value="11.500" step="0.001"></div>
         <div class="input-group"><label>Length (m)</label><input type="number" id="totalLen" value="12.0" step="0.1"></div>
@@ -73,11 +75,39 @@
 
 <script id="worker-script" type="javascript/worker">
     const NL = String.fromCharCode(10);
-    function _pt(p) { return `10${NL}${p[0].toFixed(4)}${NL}20${NL}${p[1].toFixed(4)}`; }
+    function _pt(p) { return `10${NL}${p.x.toFixed(4)}${NL}20${NL}${p.y.toFixed(4)}`; }
+    
     self.onmessage = function(e) {
         const { pts, name } = e.data;
-        let d = ['0','SECTION','2','ENTITIES','0','LWPOLYLINE','8','DESIGN','62','3','90',pts.length].join(NL);
+        let d = ['0','SECTION','2','ENTITIES'].join(NL);
+        
+        // 1. Profile Polyline
+        d += `${NL}0${NL}LWPOLYLINE${NL}8${NL}DESIGN${NL}62${NL}3${NL}90${NL}${pts.length}`;
         pts.forEach(p => d += `${NL}${_pt(p)}`);
+
+        // 2. Dimensions & Labels
+        const keyPts = pts.filter(p => p.isKey);
+        const maxY = Math.max(...pts.map(p => p.y));
+        const dimY = maxY + 1.0; 
+
+        keyPts.forEach((p, i) => {
+            // RL Text
+            d += `${NL}0${NL}TEXT${NL}8${NL}LEVELS${NL}62${NL}3${NL}10${NL}${p.x.toFixed(4)}${NL}20${NL}${(p.y - 0.2).toFixed(4)}${NL}40${NL}0.1${NL}72${NL}1${NL}11${NL}${p.x.toFixed(4)}${NL}21${NL}${(p.y - 0.2).toFixed(4)}${NL}1${NL}RL ${p.y.toFixed(3)}`;
+            
+            // Dim Tick
+            d += `${NL}0${NL}LINE${NL}8${NL}DIMS${NL}62${NL}8${NL}10${NL}${p.x.toFixed(4)}${NL}20${NL}${(dimY-0.1).toFixed(4)}${NL}11${NL}${p.x.toFixed(4)}${NL}21${NL}${(dimY+0.1).toFixed(4)}`;
+
+            // Dim Line & Length Text
+            if (i < keyPts.length - 1) {
+                const nxt = keyPts[i+1];
+                const dist = nxt.x - p.x;
+                const midX = p.x + dist/2;
+                
+                d += `${NL}0${NL}LINE${NL}8${NL}DIMS${NL}62${NL}8${NL}10${NL}${p.x.toFixed(4)}${NL}20${NL}${dimY.toFixed(4)}${NL}11${NL}${nxt.x.toFixed(4)}${NL}21${NL}${dimY.toFixed(4)}`;
+                d += `${NL}0${NL}TEXT${NL}8${NL}DIMS${NL}62${NL}8${NL}10${NL}${midX.toFixed(4)}${NL}20${NL}${(dimY + 0.1).toFixed(4)}${NL}40${NL}0.1${NL}72${NL}1${NL}11${NL}${midX.toFixed(4)}${NL}21${NL}${(dimY + 0.1).toFixed(4)}${NL}1${NL}${dist.toFixed(2)}m`;
+            }
+        });
+
         d += `${NL}0${NL}ENDSEC${NL}0${NL}EOF`;
         self.postMessage({ dxf: d, file: name + ".dxf" });
     };
@@ -90,7 +120,6 @@
     };
     let mouseX = -1;
 
-    // UI Toggle Logic
     d3.select("#ignoreFp").on("change", function() {
         const isHidden = this.checked;
         d3.select("#fpWidthGroup").style("display", isHidden ? "none" : "flex");
@@ -113,22 +142,21 @@
         };
 
         const dir = Math.sign(cfg.t - cfg.s);
-        let res = [{x: 0, y: cfg.s}];
+        let res = [{x: 0, y: cfg.s, isKey: true}]; // Start
         let curX = 0, curY = cfg.s;
 
         // 1. Kerb
         curX += cfg.kL; curY += (cfg.kL * cfg.kG * dir);
-        res.push({x: curX, y: curY});
+        res.push({x: curX, y: curY, isKey: true});
 
         // 2. Footpath
         let gStart = cfg.kG * dir;
         if(!cfg.noFP) {
             curX += cfg.fW; curY += (cfg.fW * cfg.fG * dir);
-            res.push({x: curX, y: curY});
+            res.push({x: curX, y: curY, isKey: true});
             gStart = cfg.fG * dir;
         }
 
-        // 3. Exact Solver
         const x_rem = cfg.len - curX;
         if (x_rem < 3.0) {
             d3.select("#status").text("ERROR: Driveway too short for transitions.");
@@ -145,13 +173,13 @@
             let gCurr = gStart + (mainG - gStart) * (i/10);
             curY += (cfg.trans/10) * (gPrev + gCurr) / 2;
             curX += (cfg.trans/10);
-            res.push({x: curX, y: curY});
+            res.push({x: curX, y: curY, isKey: i === 10}); // Mark end of curve
             gPrev = gCurr;
         }
 
         // Main Driveway
         curX += x_main; curY += (x_main * mainG);
-        res.push({x: curX, y: curY});
+        res.push({x: curX, y: curY, isKey: true});
 
         // Transition 2
         gPrev = mainG;
@@ -159,14 +187,13 @@
             let gCurr = mainG + (0 - mainG) * (i/10);
             curY += (cfg.trans/10) * (gPrev + gCurr) / 2;
             curX += (cfg.trans/10);
-            res.push({x: curX, y: curY});
+            res.push({x: curX, y: curY, isKey: i === 10}); // Mark end of curve
             gPrev = gCurr;
         }
 
         // 4. Garage Flat
-        res.push({x: curX + cfg.flat, y: curY});
+        res.push({x: curX + cfg.flat, y: curY, isKey: true});
         
-        // Status Update
         d3.select("#status").text(Math.abs(mainG) > cfg.maxG ? `EXCEEDS ${(cfg.maxG*100).toFixed(1)}%: ${(mainG*100).toFixed(1)}%` : "");
         return res;
     }
@@ -183,7 +210,7 @@
         const data = solve();
         const svg = d3.select("#profileDisplay");
         const {width, height} = svg.node().getBoundingClientRect();
-        const margin = {top: 40, right: 40, bottom: 40, left: 60};
+        const margin = {top: 60, right: 40, bottom: 40, left: 60}; // Increased top margin for dimensions
         svg.selectAll("*").remove();
 
         if(data.length < 3) return;
@@ -191,15 +218,13 @@
         const totalX = d3.max(data, d=>d.x);
         const yExt = d3.extent(data, d=>d.y);
         
-        // 1:1 TRUE SCALE CALCULATIONS
+        // 1:1 TRUE SCALE
         const drawWidth = width - margin.left - margin.right;
         const metersPerPixel = totalX / drawWidth;
         const drawHeightMeters = (height - margin.top - margin.bottom) * metersPerPixel;
         const yCenter = (yExt[0] + yExt[1]) / 2;
 
         const xS = d3.scaleLinear().domain([0, totalX]).range([margin.left, width - margin.right]);
-        
-        // Lock Y scale strictly to the X scale's ratio
         const yS = d3.scaleLinear()
             .domain([yCenter - drawHeightMeters/2, yCenter + drawHeightMeters/2])
             .range([height - margin.bottom, margin.top]);
@@ -207,6 +232,30 @@
         // Draw Profile
         svg.append("path").datum(data).attr("fill", "none").attr("stroke", "#00e676").attr("stroke-width", 3).attr("d", d3.line().x(d => xS(d.x)).y(d => yS(d.y)));
         
+        // --- DRAW LABELS & DIMENSIONS ---
+        const keyPts = data.filter(d => d.isKey);
+        const dimY = margin.top / 2;
+
+        // RL Texts
+        svg.selectAll(".rl-text").data(keyPts).enter().append("text").attr("class", "rl-text")
+           .attr("x", d => xS(d.x)).attr("y", d => yS(d.y) + 18)
+           .text(d => d.y.toFixed(3));
+
+        // Dimension Lines & Ticks
+        svg.selectAll(".dim-line").data(keyPts.slice(0,-1)).enter().append("line")
+           .attr("x1", d => xS(d.x)).attr("x2", (d,i) => xS(keyPts[i+1].x))
+           .attr("y1", dimY).attr("y2", dimY).attr("stroke", "#555");
+           
+        svg.selectAll(".dim-tick").data(keyPts).enter().append("line")
+           .attr("x1", d => xS(d.x)).attr("x2", d => xS(d.x))
+           .attr("y1", dimY - 6).attr("y2", dimY + 6).attr("stroke", "#555");
+
+        // Dimension Texts
+        svg.selectAll(".dim-text").data(keyPts.slice(0,-1)).enter().append("text").attr("class", "dim-text")
+           .attr("x", (d,i) => (xS(d.x) + xS(keyPts[i+1].x))/2).attr("y", dimY - 8)
+           .text((d,i) => (keyPts[i+1].x - d.x).toFixed(2) + "m");
+        // --------------------------------
+
         // Interactive Hover
         const pX = xS.invert(mouseX);
         if(pX >= 0 && pX <= totalX && mouseX > 0) {
@@ -223,9 +272,9 @@
             const vT = d3.select("#vehicleType").property("value");
             if(vT !== "none") {
                 const v = vehicles[vT];
-                const frontWheelX = pX + v.wheelbase;
+                const fW_X = pX + v.wheelbase;
                 const rY = pY;
-                const fY = getInterpY(data, frontWheelX);
+                const fY = getInterpY(data, fW_X);
                 const angle = Math.atan2(fY - rY, v.wheelbase) * (180/Math.PI);
 
                 svg.append("rect")
@@ -246,7 +295,7 @@
 
     const blob = new Blob([document.getElementById('worker-script').textContent], { type: 'application/javascript' });
     const worker = new Worker(URL.createObjectURL(blob));
-    function exportDXF() { worker.postMessage({ pts: solve().map(p => [p.x, p.y]), name: d3.select("#projName").property("value") }); }
+    function exportDXF() { worker.postMessage({ pts: solve(), name: d3.select("#projName").property("value") }); }
     worker.onmessage = (e) => {
         const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([e.data.dxf], { type: 'application/dxf' }));
         a.download = e.data.file; a.click();
@@ -263,14 +312,11 @@
             const s = JSON.parse(ev.target.result); Object.keys(s).forEach(k => {
                 const el = d3.select("#"+k); if(el.property("type")==='checkbox') el.property("checked", s[k]); else el.property("value", s[k]);
             }); 
-            // Trigger checkbox logic manually after load
-            d3.select("#ignoreFp").dispatch('change');
-            render();
+            d3.select("#ignoreFp").dispatch('change'); render();
         }; r.readAsText(e.target.files[0]);
     }
 
     d3.selectAll("input").on("input", render);
-    // Initialize checkbox state on load
     d3.select("#ignoreFp").dispatch('change');
     render();
     window.addEventListener('resize', render);
