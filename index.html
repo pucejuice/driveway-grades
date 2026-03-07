@@ -25,7 +25,9 @@
         .axis text { fill: #666; font-size: 11px; }
         .tooltip-text { fill: var(--accent); font-family: monospace; font-size: 13px; pointer-events: none; font-weight: bold; }
         .dim-text { fill: #aaa; font-size: 11px; text-anchor: middle; user-select: none; }
+        .dim-grade { fill: var(--accent); font-size: 10px; text-anchor: middle; user-select: none; font-weight: bold; }
         .rl-text { fill: var(--accent); font-size: 10px; text-anchor: middle; font-family: monospace; user-select: none; }
+        .scrape-warn { fill: var(--error); font-weight: 900; font-size: 14px; text-anchor: middle; pointer-events: none; }
     </style>
 </head>
 <body>
@@ -41,7 +43,7 @@
         <div class="input-group"><label>Street RL</label><input type="number" id="startElev" value="10.000" step="0.001"></div>
         <div class="input-group"><label>Garage RL</label><input type="number" id="targetElev" value="11.500" step="0.001"></div>
         <div class="input-group"><label>Length (m)</label><input type="number" id="totalLen" value="12.0" step="0.1"></div>
-        <div class="input-group"><label>Max Grade %</label><input type="number" id="maxGrade" value="25.0" step="0.5"></div>
+        <div class="input-group"><label>Max Grade ±%</label><input type="number" id="maxGrade" value="25.0" step="0.5"></div>
         <div class="input-group"><label>Ramp Len</label><input type="number" id="kerbLen" value="1.5" step="0.1"></div>
         <div class="input-group"><label>Ramp %</label><input type="number" id="kerbGrade" value="12.5" step="0.1"></div>
         
@@ -91,20 +93,26 @@
         const dimY = maxY + 1.0; 
 
         keyPts.forEach((p, i) => {
-            // RL Text
+            // Level Annotations
             d += `${NL}0${NL}TEXT${NL}8${NL}LEVELS${NL}62${NL}3${NL}10${NL}${p.x.toFixed(4)}${NL}20${NL}${(p.y - 0.2).toFixed(4)}${NL}40${NL}0.1${NL}72${NL}1${NL}11${NL}${p.x.toFixed(4)}${NL}21${NL}${(p.y - 0.2).toFixed(4)}${NL}1${NL}RL ${p.y.toFixed(3)}`;
-            
-            // Dim Tick
+            // Vertical Dimension Ticks
             d += `${NL}0${NL}LINE${NL}8${NL}DIMS${NL}62${NL}8${NL}10${NL}${p.x.toFixed(4)}${NL}20${NL}${(dimY-0.1).toFixed(4)}${NL}11${NL}${p.x.toFixed(4)}${NL}21${NL}${(dimY+0.1).toFixed(4)}`;
 
-            // Dim Line & Length Text
             if (i < keyPts.length - 1) {
                 const nxt = keyPts[i+1];
                 const dist = nxt.x - p.x;
                 const midX = p.x + dist/2;
                 
+                // Horizontal Dimension Line
                 d += `${NL}0${NL}LINE${NL}8${NL}DIMS${NL}62${NL}8${NL}10${NL}${p.x.toFixed(4)}${NL}20${NL}${dimY.toFixed(4)}${NL}11${NL}${nxt.x.toFixed(4)}${NL}21${NL}${dimY.toFixed(4)}`;
-                d += `${NL}0${NL}TEXT${NL}8${NL}DIMS${NL}62${NL}8${NL}10${NL}${midX.toFixed(4)}${NL}20${NL}${(dimY + 0.1).toFixed(4)}${NL}40${NL}0.1${NL}72${NL}1${NL}11${NL}${midX.toFixed(4)}${NL}21${NL}${(dimY + 0.1).toFixed(4)}${NL}1${NL}${dist.toFixed(2)}m`;
+                
+                // Length Text
+                d += `${NL}0${NL}TEXT${NL}8${NL}DIMS${NL}62${NL}8${NL}10${NL}${midX.toFixed(4)}${NL}20${NL}${(dimY + 0.15).toFixed(4)}${NL}40${NL}0.1${NL}72${NL}1${NL}11${NL}${midX.toFixed(4)}${NL}21${NL}${(dimY + 0.15).toFixed(4)}${NL}1${NL}${dist.toFixed(2)}m`;
+                
+                // Grade Text (Omitted for curves)
+                if (p.nextLabel) {
+                    d += `${NL}0${NL}TEXT${NL}8${NL}DIMS${NL}62${NL}3${NL}10${NL}${midX.toFixed(4)}${NL}20${NL}${(dimY + 0.04).toFixed(4)}${NL}40${NL}0.08${NL}72${NL}1${NL}11${NL}${midX.toFixed(4)}${NL}21${NL}${(dimY + 0.04).toFixed(4)}${NL}1${NL}${p.nextLabel}`;
+                }
             }
         });
 
@@ -120,6 +128,15 @@
     };
     let mouseX = -1;
 
+    // Helper function to get yymmdd string
+    function getYYMMDD() {
+        const now = new Date();
+        const yy = String(now.getFullYear()).slice(-2);
+        const mm = String(now.getMonth() + 1).padStart(2, '0');
+        const dd = String(now.getDate()).padStart(2, '0');
+        return yy + mm + dd;
+    }
+
     d3.select("#ignoreFp").on("change", function() {
         const isHidden = this.checked;
         d3.select("#fpWidthGroup").style("display", isHidden ? "none" : "flex");
@@ -133,28 +150,28 @@
             t: +d3.select("#targetElev").property("value"),
             len: +d3.select("#totalLen").property("value"),
             kL: +d3.select("#kerbLen").property("value"),
-            kG: +d3.select("#kerbGrade").property("value")/100,
+            kG: +d3.select("#kerbGrade").property("value")/100, 
             fW: +d3.select("#fpWidth").property("value"),
-            fG: +d3.select("#fpGrade").property("value")/100,
+            fG: +d3.select("#fpGrade").property("value")/100, 
             maxG: +d3.select("#maxGrade").property("value")/100,
             noFP: d3.select("#ignoreFp").property("checked"),
             flat: 2.0, trans: 1.5
         };
 
-        const dir = Math.sign(cfg.t - cfg.s);
-        let res = [{x: 0, y: cfg.s, isKey: true}]; // Start
+        // nextLabel stores the grade of the segment proceeding the point
+        let res = [{x: 0, y: cfg.s, isKey: true, nextLabel: (cfg.kG * 100).toFixed(1) + "%"}];
         let curX = 0, curY = cfg.s;
 
         // 1. Kerb
-        curX += cfg.kL; curY += (cfg.kL * cfg.kG * dir);
-        res.push({x: curX, y: curY, isKey: true});
+        curX += cfg.kL; curY += (cfg.kL * cfg.kG); 
+        res.push({x: curX, y: curY, isKey: true, nextLabel: !cfg.noFP ? (cfg.fG * 100).toFixed(1) + "%" : ""});
 
         // 2. Footpath
-        let gStart = cfg.kG * dir;
+        let gStart = cfg.kG;
         if(!cfg.noFP) {
-            curX += cfg.fW; curY += (cfg.fW * cfg.fG * dir);
-            res.push({x: curX, y: curY, isKey: true});
-            gStart = cfg.fG * dir;
+            curX += cfg.fW; curY += (cfg.fW * cfg.fG);
+            res.push({x: curX, y: curY, isKey: true, nextLabel: ""}); // Next segment is curve (omit label)
+            gStart = cfg.fG;
         }
 
         const x_rem = cfg.len - curX;
@@ -173,13 +190,13 @@
             let gCurr = gStart + (mainG - gStart) * (i/10);
             curY += (cfg.trans/10) * (gPrev + gCurr) / 2;
             curX += (cfg.trans/10);
-            res.push({x: curX, y: curY, isKey: i === 10}); // Mark end of curve
+            res.push({x: curX, y: curY, isKey: i === 10, nextLabel: i === 10 ? (mainG * 100).toFixed(1) + "%" : undefined}); 
             gPrev = gCurr;
         }
 
         // Main Driveway
         curX += x_main; curY += (x_main * mainG);
-        res.push({x: curX, y: curY, isKey: true});
+        res.push({x: curX, y: curY, isKey: true, nextLabel: ""}); // Next segment is curve (omit label)
 
         // Transition 2
         gPrev = mainG;
@@ -187,14 +204,14 @@
             let gCurr = mainG + (0 - mainG) * (i/10);
             curY += (cfg.trans/10) * (gPrev + gCurr) / 2;
             curX += (cfg.trans/10);
-            res.push({x: curX, y: curY, isKey: i === 10}); // Mark end of curve
+            res.push({x: curX, y: curY, isKey: i === 10, nextLabel: i === 10 ? "0.0%" : undefined}); 
             gPrev = gCurr;
         }
 
         // 4. Garage Flat
         res.push({x: curX + cfg.flat, y: curY, isKey: true});
         
-        d3.select("#status").text(Math.abs(mainG) > cfg.maxG ? `EXCEEDS ${(cfg.maxG*100).toFixed(1)}%: ${(mainG*100).toFixed(1)}%` : "");
+        d3.select("#status").text(Math.abs(mainG) > cfg.maxG ? `EXCEEDS ±${(cfg.maxG*100).toFixed(1)}%: ${(mainG*100).toFixed(1)}%` : "");
         return res;
     }
 
@@ -206,11 +223,36 @@
         return p1.y + (x - p1.x) / (p2.x - p1.x) * (p2.y - p1.y);
     }
 
+    // --- MATHEMATICAL COLLISION DETECTION ---
+    function checkCollision(data, pX, v) {
+        const rY = getInterpY(data, pX);
+        const fX = pX + v.wheelbase;
+        const fY = getInterpY(data, fX);
+        
+        const slope = (fY - rY) / v.wheelbase;
+        
+        const startX = pX - v.rearOH;
+        const endX = pX + v.wheelbase + v.frontOH;
+        const maxX = d3.max(data, d => d.x);
+
+        for (let x = startX; x <= endX; x += 0.05) {
+            if (x < 0 || x > maxX) continue; 
+            
+            const groundY = getInterpY(data, x);
+            const chassisY = rY + v.groundClr + (x - pX) * slope;
+            
+            if (groundY > chassisY) {
+                return true; 
+            }
+        }
+        return false;
+    }
+
     function render() {
         const data = solve();
         const svg = d3.select("#profileDisplay");
         const {width, height} = svg.node().getBoundingClientRect();
-        const margin = {top: 60, right: 40, bottom: 40, left: 60}; // Increased top margin for dimensions
+        const margin = {top: 70, right: 40, bottom: 40, left: 60}; 
         svg.selectAll("*").remove();
 
         if(data.length < 3) return;
@@ -232,31 +274,33 @@
         // Draw Profile
         svg.append("path").datum(data).attr("fill", "none").attr("stroke", "#00e676").attr("stroke-width", 3).attr("d", d3.line().x(d => xS(d.x)).y(d => yS(d.y)));
         
-        // --- DRAW LABELS & DIMENSIONS ---
+        // DRAW LABELS & DIMENSIONS
         const keyPts = data.filter(d => d.isKey);
         const dimY = margin.top / 2;
 
-        // RL Texts
         svg.selectAll(".rl-text").data(keyPts).enter().append("text").attr("class", "rl-text")
            .attr("x", d => xS(d.x)).attr("y", d => yS(d.y) + 18)
            .text(d => d.y.toFixed(3));
 
-        // Dimension Lines & Ticks
         svg.selectAll(".dim-line").data(keyPts.slice(0,-1)).enter().append("line")
            .attr("x1", d => xS(d.x)).attr("x2", (d,i) => xS(keyPts[i+1].x))
            .attr("y1", dimY).attr("y2", dimY).attr("stroke", "#555");
            
         svg.selectAll(".dim-tick").data(keyPts).enter().append("line")
            .attr("x1", d => xS(d.x)).attr("x2", d => xS(d.x))
-           .attr("y1", dimY - 6).attr("y2", dimY + 6).attr("stroke", "#555");
+           .attr("y1", dimY - 8).attr("y2", dimY + 8).attr("stroke", "#555");
 
-        // Dimension Texts
+        // Dimension Lengths
         svg.selectAll(".dim-text").data(keyPts.slice(0,-1)).enter().append("text").attr("class", "dim-text")
-           .attr("x", (d,i) => (xS(d.x) + xS(keyPts[i+1].x))/2).attr("y", dimY - 8)
+           .attr("x", (d,i) => (xS(d.x) + xS(keyPts[i+1].x))/2).attr("y", dimY - 14)
            .text((d,i) => (keyPts[i+1].x - d.x).toFixed(2) + "m");
-        // --------------------------------
 
-        // Interactive Hover
+        // Dimension Grades (Omitted for curves)
+        svg.selectAll(".dim-grade").data(keyPts.slice(0,-1)).enter().append("text").attr("class", "dim-grade")
+           .attr("x", (d,i) => (xS(d.x) + xS(keyPts[i+1].x))/2).attr("y", dimY - 2)
+           .text(d => d.nextLabel || "");
+
+        // Interactive Hover & Vehicle Checks
         const pX = xS.invert(mouseX);
         if(pX >= 0 && pX <= totalX && mouseX > 0) {
             const pY = getInterpY(data, pX);
@@ -277,11 +321,22 @@
                 const fY = getInterpY(data, fW_X);
                 const angle = Math.atan2(fY - rY, v.wheelbase) * (180/Math.PI);
 
+                const isScraping = checkCollision(data, pX, v);
+                const carColor = isScraping ? "rgba(255, 0, 0, 0.7)" : "rgba(0, 230, 118, 0.4)";
+
                 svg.append("rect")
-                   .attr("x", xS(pX - v.rearOH)).attr("y", yS(rY + v.groundClr))
+                   .attr("x", xS(pX - v.rearOH)).attr("y", yS(rY + v.groundClr)) 
                    .attr("width", xS(v.wheelbase + v.frontOH + v.rearOH) - margin.left).attr("height", 4)
-                   .attr("fill", "rgba(255, 82, 82, 0.8)")
+                   .attr("fill", carColor)
                    .attr("transform", `rotate(${-angle}, ${xS(pX)}, ${yS(rY)})`);
+
+                if(isScraping) {
+                    svg.append("text")
+                       .attr("class", "scrape-warn")
+                       .attr("x", xS(pX + v.wheelbase/2))
+                       .attr("y", yS(rY + v.groundClr + 0.8))
+                       .text("⚠️ SCRAPING DETECTED");
+                }
             }
         }
 
@@ -295,7 +350,11 @@
 
     const blob = new Blob([document.getElementById('worker-script').textContent], { type: 'application/javascript' });
     const worker = new Worker(URL.createObjectURL(blob));
-    function exportDXF() { worker.postMessage({ pts: solve(), name: d3.select("#projName").property("value") }); }
+    function exportDXF() { 
+        const dateSuffix = getYYMMDD();
+        const baseName = d3.select("#projName").property("value") || "Driveway-Design";
+        worker.postMessage({ pts: solve(), name: `${baseName}_${dateSuffix}` }); 
+    }
     worker.onmessage = (e) => {
         const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([e.data.dxf], { type: 'application/dxf' }));
         a.download = e.data.file; a.click();
@@ -303,8 +362,10 @@
 
     function saveProject() {
         const s = {}; d3.selectAll("input").each(function() { s[this.id] = this.type==='checkbox'?this.checked:this.value; });
+        const dateSuffix = getYYMMDD();
+        const baseName = d3.select("#projName").property("value") || "Driveway-Design";
         const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(s)], {type:'application/json'}));
-        a.download = d3.select("#projName").property("value") + ".json"; a.click();
+        a.download = `${baseName}_${dateSuffix}.json`; a.click();
     }
 
     function loadProject(e) {
