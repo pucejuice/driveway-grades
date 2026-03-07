@@ -15,6 +15,8 @@
         input, select { background: #222; border: 1px solid #444; color: #fff; padding: 10px; border-radius: 4px; font-size: 0.9rem; }
         .checkbox-group { flex-direction: row; align-items: center; gap: 8px; padding-top: 25px; }
         .checkbox-group input { width: 16px; height: 16px; cursor: pointer; margin: 0; }
+        .mini-btn { background: #333; color: var(--accent); border: 1px solid #444; border-radius: 4px; cursor: pointer; font-weight: bold; transition: 0.2s; }
+        .mini-btn:hover { background: #444; color: #fff; }
         svg { width: 100%; height: 450px; background: #000; border-radius: 8px; margin-top: 20px; border: 1px solid #222; cursor: crosshair; }
         .btn-group { display: flex; gap: 12px; margin-top: 25px; }
         button { padding: 12px 20px; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; text-transform: uppercase; font-size: 0.8rem; }
@@ -41,7 +43,16 @@
     <div class="controls">
         <div class="input-group"><label>Project</label><input type="text" id="projName" value="Driveway-Design"></div>
         <div class="input-group"><label>Street RL</label><input type="number" id="startElev" value="10.000" step="0.001"></div>
-        <div class="input-group"><label>Garage RL</label><input type="number" id="targetElev" value="9.000" step="0.001"></div>
+        
+        <div class="input-group">
+            <label>Garage RL</label>
+            <input type="number" id="targetElev" value="9.000" step="0.001">
+            <div style="display:flex; gap: 5px; margin-top: 6px;">
+                <button class="mini-btn" onclick="calcMaxTarget(1)" style="flex:1; padding: 4px; font-size:0.65rem;" title="Auto-calculate Max Height">MAX ↑</button>
+                <button class="mini-btn" onclick="calcMaxTarget(-1)" style="flex:1; padding: 4px; font-size:0.65rem;" title="Auto-calculate Max Depth">MAX ↓</button>
+            </div>
+        </div>
+
         <div class="input-group"><label>Length (m)</label><input type="number" id="totalLen" value="12.0" step="0.1"></div>
         <div class="input-group"><label>Max Grade ±%</label><input type="number" id="maxGrade" value="25.0" step="0.5"></div>
         <div class="input-group"><label>Ramp Len</label><input type="number" id="kerbLen" value="1.5" step="0.1"></div>
@@ -57,7 +68,7 @@
         
         <div class="input-group checkbox-group">
             <input type="checkbox" id="forceCrest" checked>
-            <label style="margin:0; font-size:0.75rem;" title="Ensure 250mm freeboard above street RL for downward sloping lots">min. 250mm Crest</label>
+            <label style="margin:0; font-size:0.75rem;" title="Ensure 250mm freeboard above street RL for downward sloping lots">Min. 250mm Crest</label>
         </div>
 
         <div class="input-group">
@@ -88,11 +99,10 @@
         const { pts, name } = e.data;
         let d = ['0','SECTION','2','ENTITIES'].join(NL);
         
-        // 1. Profile Polyline
+        // Profile Polyline
         d += `${NL}0${NL}LWPOLYLINE${NL}8${NL}DESIGN${NL}62${NL}3${NL}90${NL}${pts.length}`;
         pts.forEach(p => d += `${NL}${_pt(p)}`);
 
-        // 2. Dimensions & Labels
         const keyPts = pts.filter(p => p.isKey);
         const maxY = Math.max(...pts.map(p => p.y));
         const dimY = maxY + 1.0; 
@@ -110,11 +120,9 @@
                 
                 // Horizontal Dimension Line
                 d += `${NL}0${NL}LINE${NL}8${NL}DIMS${NL}62${NL}8${NL}10${NL}${p.x.toFixed(4)}${NL}20${NL}${dimY.toFixed(4)}${NL}11${NL}${nxt.x.toFixed(4)}${NL}21${NL}${dimY.toFixed(4)}`;
-                
                 // Length Text
                 d += `${NL}0${NL}TEXT${NL}8${NL}DIMS${NL}62${NL}8${NL}10${NL}${midX.toFixed(4)}${NL}20${NL}${(dimY + 0.15).toFixed(4)}${NL}40${NL}0.1${NL}72${NL}1${NL}11${NL}${midX.toFixed(4)}${NL}21${NL}${(dimY + 0.15).toFixed(4)}${NL}1${NL}${dist.toFixed(2)}m`;
-                
-                // Grade Text (Omitted for curves)
+                // Grade Text
                 if (p.nextLabel) {
                     d += `${NL}0${NL}TEXT${NL}8${NL}DIMS${NL}62${NL}3${NL}10${NL}${midX.toFixed(4)}${NL}20${NL}${(dimY + 0.04).toFixed(4)}${NL}40${NL}0.08${NL}72${NL}1${NL}11${NL}${midX.toFixed(4)}${NL}21${NL}${(dimY + 0.04).toFixed(4)}${NL}1${NL}${p.nextLabel}`;
                 }
@@ -149,6 +157,50 @@
 
     d3.select("#forceCrest").on("change", render);
 
+    // --- AUTO CALCULATE MAX BOUNDS ---
+    function calcMaxTarget(direction) {
+        const s = +d3.select("#startElev").property("value");
+        const len = +d3.select("#totalLen").property("value");
+        const kL = +d3.select("#kerbLen").property("value");
+        const kG = +d3.select("#kerbGrade").property("value")/100;
+        const fW = +d3.select("#fpWidth").property("value");
+        const fG = +d3.select("#fpGrade").property("value")/100;
+        const maxG = +d3.select("#maxGrade").property("value")/100;
+        const noFP = d3.select("#ignoreFp").property("checked");
+        const forceCrest = d3.select("#forceCrest").property("checked");
+
+        let curX = kL;
+        let curY = s + (kL * kG);
+        let gStart = kG;
+
+        if (!noFP) {
+            curX += fW;
+            curY += (fW * fG);
+            gStart = fG;
+        }
+
+        if (direction < 0 && forceCrest && curY < s + 0.25) {
+            const reqY = s + 0.25;
+            const dist = (reqY - curY) / 0.05;
+            curX += dist;
+            curY = reqY;
+            gStart = 0.0;
+        }
+
+        const x_rem = len - curX;
+        if (x_rem < 3.0) {
+            d3.select("#status").text("ERROR: Driveway too short for transitions.");
+            return;
+        }
+
+        const mainG = maxG * direction;
+        // Formula: Target RL = Entry RL + dY_trans1 + dY_main + dY_trans2
+        const targetRL = curY + 0.75 * gStart + mainG * (x_rem - 1.5);
+        
+        d3.select("#targetElev").property("value", targetRL.toFixed(3));
+        render();
+    }
+
     function solve() {
         const cfg = {
             s: +d3.select("#startElev").property("value"),
@@ -181,13 +233,13 @@
 
         // 2.5 Queensland 250mm Crest Requirement Check
         if (cfg.forceCrest && cfg.t < cfg.s && curY < cfg.s + 0.25) {
-            res[res.length - 1].nextLabel = "5.0%"; // Label for the up-grade
+            res[res.length - 1].nextLabel = "5.0%"; 
             const reqY = cfg.s + 0.25;
-            const dist = (reqY - curY) / 0.05; // Extend at 5% grade to reach the 250mm freeboard
+            const dist = (reqY - curY) / 0.05; 
             curX += dist;
             curY = reqY;
             res.push({x: curX, y: curY, isKey: true, nextLabel: ""});
-            gStart = 0.0; // The transition down starts perfectly flat at the crest
+            gStart = 0.0; 
         }
 
         const x_rem = cfg.len - curX;
@@ -227,7 +279,8 @@
         // 4. Garage Flat
         res.push({x: curX + cfg.flat, y: curY, isKey: true});
         
-        d3.select("#status").text(Math.abs(mainG) > cfg.maxG ? `EXCEEDS ±${(cfg.maxG*100).toFixed(1)}%: ${(mainG*100).toFixed(1)}%` : "");
+        // Epsilon added to avoid floating-point math false positives
+        d3.select("#status").text(Math.abs(mainG) > cfg.maxG + 0.0001 ? `EXCEEDS ±${(cfg.maxG*100).toFixed(1)}%: ${(mainG*100).toFixed(1)}%` : "");
         return res;
     }
 
@@ -380,7 +433,9 @@
             const s = JSON.parse(ev.target.result); Object.keys(s).forEach(k => {
                 const el = d3.select("#"+k); if(el.property("type")==='checkbox') el.property("checked", s[k]); else el.property("value", s[k]);
             }); 
-            d3.select("#ignoreFp").dispatch('change'); render();
+            d3.select("#ignoreFp").dispatch('change');
+            d3.select("#forceCrest").dispatch('change');
+            render();
         }; r.readAsText(e.target.files[0]);
     }
 
